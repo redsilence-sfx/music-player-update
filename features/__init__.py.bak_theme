@@ -14,5 +14,3 @@ __all__ = [
     "MusicQuizWidget", "StatsManager", "StatsWidget", "UIEnhancer",
     "SmartPlaylistGenerator", "SmartPlaylistDialog",
 ]
-
-from .theme_customizer import ThemeManager, ThemeCustomizationDialog

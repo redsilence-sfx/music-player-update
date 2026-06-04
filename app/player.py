@@ -6,7 +6,7 @@ import pygame
 from PyQt5.QtWidgets import (
     QMainWindow, QFileDialog, QListWidgetItem, QWidget, QHBoxLayout,
     QVBoxLayout, QBoxLayout, QFrame, QSizePolicy, QMenu, QPushButton,
-    QGraphicsOpacityEffect,
+    QToolButton, QAction, QLabel, QGraphicsOpacityEffect,
 )
 from PyQt5.QtCore import QTimer, Qt, QPropertyAnimation, QRect, QEasingCurve, QSize
 from PyQt5.QtGui import QPixmap, QColor, QKeySequence, QIcon, QPainter, QPainterPath
@@ -25,7 +25,7 @@ from features import (
     LyricsWidget, MoodColorEngine,
     SleepTimerWidget, PlaylistManager, PlaylistWidget,
     RecentlyPlayedManager, RecentlyPlayedWidget,
-    MusicQuizWidget, StatsManager, StatsWidget,
+    MusicQuizWidget, StatsManager, StatsWidget, ThemeManager, ThemeCustomizationDialog,
 )
 
 pygame.mixer.init()
@@ -100,8 +100,10 @@ class MusicPlayer(QMainWindow):
         self.toast = ToastManager(self)
         self.ui_enhancer = UIEnhancer(self)
         self.ui_enhancer.install()
+        self.theme_manager = ThemeManager()
+        self.theme_manager.apply_to(self)
         self.smart_generator = SmartPlaylistGenerator()
-        self._setup_smart_playlist_button()
+        self._setup_actions_menu()
 
         self._setup_default_album_art()
         self._setup_like_icon()
@@ -378,6 +380,284 @@ class MusicPlayer(QMainWindow):
         groq_action = self.ai_chat_menu.addAction("Groq AI")
         gpt_action.triggered.connect(lambda checked=False: self._go_page(C.PAGE_AI_CHAT))
         groq_action.triggered.connect(lambda checked=False: self._go_page(C.PAGE_AI_CHAT_V2))
+
+    def _setup_actions_menu(self):
+        """
+        Gabungkan Add Song, Smart Mix, dan Theme dalam satu tombol custom popup.
+
+        Ini sengaja tidak memakai QMenu bawaan Qt, karena QMenu punya kolom icon
+        native yang susah dibuat benar-benar center. Dengan QFrame custom, radius,
+        posisi icon + text, hover box, dan padding bisa dikontrol penuh.
+        """
+        if not hasattr(self, "topNavBar"):
+            return
+
+        top_layout = self.topNavBar.layout()
+        if top_layout is None:
+            return
+
+        # Tombol Add Song lama tetap dipakai signal/function-nya,
+        # tetapi visualnya disembunyikan agar top bar tidak penuh.
+        if hasattr(self, "btnAddSong"):
+            top_layout.removeWidget(self.btnAddSong)
+            self.btnAddSong.setVisible(False)
+            self.btnAddSong.setMaximumSize(0, 0)
+
+        # Kalau sebelumnya pernah ada tombol terpisah dari patch lama,
+        # sembunyikan juga supaya tidak dobel.
+        for attr in ("btnTheme", "btnSmartPlaylist"):
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                top_layout.removeWidget(btn)
+                btn.setVisible(False)
+                btn.setMaximumSize(0, 0)
+
+        def safe_icon(svg_name: str, color: str = "#C4B5FD", size: int = 18):
+            icon = _svg_icon(resource_path("icons", "svg", svg_name), color, size)
+            return icon if not icon.isNull() else QIcon()
+
+        # Popup luar dibuat transparan, lalu isi visualnya digambar di panel dalam.
+        # Ini menghindari efek "background hilang" atau sudut kotak native dari top-level popup.
+        self.actionsPopup = QFrame(self, Qt.Popup | Qt.FramelessWindowHint)
+        self.actionsPopup.setObjectName("actionsPopup")
+        self.actionsPopup.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.actionsPopup.setStyleSheet("""
+            QFrame#actionsPopup {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+
+        popup_root_layout = QVBoxLayout(self.actionsPopup)
+        popup_root_layout.setContentsMargins(0, 0, 0, 0)
+        popup_root_layout.setSpacing(0)
+
+        self.actionsPopupPanel = QFrame(self.actionsPopup)
+        self.actionsPopupPanel.setObjectName("actionsPopupPanel")
+        self.actionsPopupPanel.setMinimumWidth(206)
+        self.actionsPopupPanel.setStyleSheet("""
+            QFrame#actionsPopupPanel {
+                background-color: rgba(13, 13, 24, 252);
+                border: 1px solid rgba(255, 255, 255, 44);
+                border-radius: 16px;
+            }
+
+            QFrame#actionsPopupItem {
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 11px;
+            }
+
+            QFrame#actionsPopupItem:hover {
+                background-color: rgba(167, 139, 250, 50);
+                border: 1px solid rgba(196, 181, 253, 80);
+            }
+
+            QFrame#actionsPopupItem:pressed {
+                background-color: rgba(167, 139, 250, 68);
+                border: 1px solid rgba(196, 181, 253, 120);
+            }
+
+            QWidget#actionsPopupContent {
+                background-color: transparent;
+                border: none;
+            }
+
+            QLabel#actionsPopupText {
+                background-color: transparent;
+                border: none;
+                color: #F3F4F6;
+                font-family: "Segoe UI";
+                font-size: 13px;
+                font-weight: bold;
+            }
+
+            QLabel#actionsPopupIcon {
+                background-color: transparent;
+                border: none;
+            }
+
+            QFrame#actionsPopupSeparator {
+                background-color: rgba(255, 255, 255, 26);
+                border: none;
+                min-height: 1px;
+                max-height: 1px;
+            }
+        """)
+        popup_root_layout.addWidget(self.actionsPopupPanel)
+
+        popup_layout = QVBoxLayout(self.actionsPopupPanel)
+        popup_layout.setContentsMargins(10, 10, 10, 10)
+        popup_layout.setSpacing(6)
+
+        def add_popup_item(text: str, icon: QIcon, callback):
+            row = QFrame(self.actionsPopupPanel)
+            row.setObjectName("actionsPopupItem")
+            row.setCursor(Qt.PointingHandCursor)
+            row.setFixedHeight(42)
+            row.setMinimumWidth(184)
+            row.setMouseTracking(True)
+            row.setAttribute(Qt.WA_Hover, True)
+
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(10, 0, 10, 0)
+            row_layout.setSpacing(0)
+
+            # Pakai content box fixed-width supaya posisi semua icon sejajar,
+            # tapi keseluruhan icon + text tetap terasa berada di tengah item.
+            content = QWidget(row)
+            content.setObjectName("actionsPopupContent")
+            content.setFixedWidth(128)
+            content_layout = QHBoxLayout(content)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            content_layout.setSpacing(10)
+
+            icon_label = QLabel(content)
+            icon_label.setObjectName("actionsPopupIcon")
+            icon_label.setFixedSize(24, 24)
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            if not icon.isNull():
+                icon_label.setPixmap(icon.pixmap(18, 18))
+
+            text_label = QLabel(text, content)
+            text_label.setObjectName("actionsPopupText")
+            text_label.setFixedWidth(94)
+            text_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+            text_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+            content_layout.addWidget(icon_label, 0, Qt.AlignVCenter)
+            content_layout.addWidget(text_label, 0, Qt.AlignVCenter)
+
+            row_layout.addStretch(1)
+            row_layout.addWidget(content, 0, Qt.AlignCenter)
+            row_layout.addStretch(1)
+
+            def run_action(event=None):
+                self.actionsPopup.hide()
+                callback()
+
+            row.mousePressEvent = run_action
+            popup_layout.addWidget(row)
+            return row
+
+        add_popup_item("Add Song", safe_icon("add_song.svg"), self.add_songs)
+        add_popup_item("Smart Mix", safe_icon("mix_song.svg"), self._open_smart_playlist_dialog)
+
+        separator = QFrame(self.actionsPopupPanel)
+        separator.setObjectName("actionsPopupSeparator")
+        separator.setFrameShape(QFrame.NoFrame)
+        popup_layout.addWidget(separator)
+
+        palette_icon = safe_icon("thema_home.svg")
+        if palette_icon.isNull():
+            palette_icon = safe_icon("zap.svg")
+        add_popup_item("Theme", palette_icon, self._open_theme_dialog)
+
+        self.btnActions = QToolButton(self.topNavBar)
+        self.btnActions.setObjectName("btnActions")
+        self.btnActions.setText("Actions")
+        self.btnActions.setToolTip("Quick actions")
+        self.btnActions.setCursor(Qt.PointingHandCursor)
+        self.btnActions.setIcon(safe_icon("zap.svg", "#C4B5FD", 17))
+        self.btnActions.setIconSize(QSize(17, 17))
+        self.btnActions.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btnActions.setPopupMode(QToolButton.DelayedPopup)
+        self.btnActions.setFixedSize(122, 38)
+        self.btnActions.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.btnActions.clicked.connect(self._show_actions_popup)
+        self.btnActions.setStyleSheet("""
+            QToolButton#btnActions {
+                background-color: rgba(255, 255, 255, 10);
+                color: #F3F4F6;
+                border: 1px solid rgba(255, 255, 255, 34);
+                border-radius: 15px;
+                padding: 0px 14px;
+                font-size: 12px;
+                font-weight: bold;
+                font-family: "Segoe UI";
+                text-align: center;
+            }
+
+            QToolButton#btnActions:hover {
+                background-color: rgba(167, 139, 250, 34);
+                color: #FFFFFF;
+                border: 1px solid rgba(196, 181, 253, 105);
+            }
+
+            QToolButton#btnActions:pressed {
+                background-color: rgba(167, 139, 250, 56);
+                border: 1px solid rgba(196, 181, 253, 135);
+            }
+
+            QToolButton#btnActions::menu-indicator {
+                image: none;
+                width: 0px;
+                height: 0px;
+            }
+        """)
+
+        top_layout.addWidget(self.btnActions, 0, Qt.AlignVCenter)
+        logger.info("Custom Actions popup initialized: Add Song, Smart Mix, Theme")
+
+    def _show_actions_popup(self):
+        """Tampilkan popup Actions tepat di bawah tombol Actions, rata kanan."""
+        if not hasattr(self, "actionsPopup") or not hasattr(self, "btnActions"):
+            return
+
+        self.actionsPopup.adjustSize()
+        pos = self.btnActions.mapToGlobal(self.btnActions.rect().bottomRight())
+        pos.setX(pos.x() - self.actionsPopup.width())
+        pos.setY(pos.y() + 8)
+        self.actionsPopup.move(pos)
+        self.actionsPopup.show()
+        self.actionsPopup.raise_()
+
+
+    def _setup_theme_button(self):
+        """Tambahkan tombol Theme ke top navigation."""
+        if not hasattr(self, "topNavBar"):
+            return
+
+        self.btnTheme = QPushButton("Theme", self.topNavBar)
+        self.btnTheme.setObjectName("btnTheme")
+        self.btnTheme.setCursor(Qt.PointingHandCursor)
+        self.btnTheme.setMinimumHeight(38)
+        self.btnTheme.setMinimumWidth(86)
+        self.btnTheme.setMaximumWidth(96)
+        self.btnTheme.clicked.connect(self._open_theme_dialog)
+
+        top_layout = self.topNavBar.layout()
+        if top_layout:
+            insert_index = max(0, top_layout.count() - 1)
+            top_layout.insertWidget(insert_index, self.btnTheme)
+
+    def _open_theme_dialog(self):
+        """Buka dialog Theme Customization."""
+        if not hasattr(self, "theme_manager"):
+            self.theme_manager = ThemeManager()
+
+        dialog = ThemeCustomizationDialog(self.theme_manager, self)
+        dialog.theme_applied.connect(self._on_theme_applied)
+        dialog.exec_()
+
+    def _on_theme_applied(self, theme_key: str):
+        """Callback setelah user memilih theme."""
+        theme_name = self.theme_manager.get_theme(theme_key).name
+
+        # Refresh active nav style agar page aktif tetap konsisten.
+        try:
+            self._go_page(self.stackedPages.currentIndex())
+        except Exception:
+            pass
+
+        if hasattr(self, "ui_enhancer"):
+            self.ui_enhancer.apply_album_gradient()
+
+        if hasattr(self, "toast"):
+            self.toast.show("Theme updated", f"{theme_name} applied.", "success")
+
+        self.statusBar.showMessage(f"Theme updated: {theme_name}")
 
     def _setup_smart_playlist_button(self):
         """
@@ -737,16 +1017,24 @@ class MusicPlayer(QMainWindow):
         return result
 
     def _fade_in_animation(self):
-        """Animasi fade-in saat aplikasi pertama kali dibuka."""
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.centralwidget.setGraphicsEffect(self.opacity_effect)
-        
-        self.fade_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_animation.setDuration(800)
-        self.fade_animation.setStartValue(0.0)
-        self.fade_animation.setEndValue(1.0)
-        self.fade_animation.setEasingCurve(QEasingCurve.InOutQuad)
-        self.fade_animation.start()
+        """
+        Animasi fade-in yang aman untuk Qt.
+
+        Jangan pasang QGraphicsOpacityEffect ke centralwidget,
+        karena bisa bentrok dengan shadow/toast/glass effect.
+        """
+        try:
+            self.setWindowOpacity(0.0)
+            self.fade_animation = QPropertyAnimation(self, b"windowOpacity")
+            self.fade_animation.setDuration(450)
+            self.fade_animation.setStartValue(0.0)
+            self.fade_animation.setEndValue(1.0)
+            self.fade_animation.setEasingCurve(QEasingCurve.InOutQuad)
+            self.fade_animation.start()
+        except Exception as e:
+            logger.warn(f"Fade animation disabled: {e}")
+            self.setWindowOpacity(1.0)
+
 
     # =========================================================================
     def _connect_signals(self):
