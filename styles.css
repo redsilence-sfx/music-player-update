@@ -486,8 +486,6 @@ QStatusBar {
     border-top: 1px solid #1A1A28;
 }
 
-/* ========== ABOUT PAGE ========== */
-
 QWidget#pageAbout {
     background-color: #0A0A0F;
 }
@@ -554,8 +552,6 @@ QLabel#lblVersionValue, QLabel#lblTechValue, QLabel#lblLicenseValue {
     font-size: 14px;
     font-weight: bold;
 }
-
-/* ========== NEW FEATURE PAGES ========== */
 
 QWidget#pagePlaylist, QWidget#pageRecent,
 QWidget#pageQuiz, QWidget#pageStats {

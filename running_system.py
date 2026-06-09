@@ -2,11 +2,6 @@ import os
 import sys
 import subprocess
 
-# ============================================================
-# SOUNDWAVE RUNNING SYSTEM
-# Install dependencies + install theme once + run app
-# ============================================================
-
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 python_path = r"C:\Users\sirodex\AppData\Local\Programs\Python\Python311\python.exe"
@@ -15,11 +10,6 @@ if not os.path.exists(python_path):
     print("❌ Python 3.11 tidak ditemukan di path tersebut!")
     print(f"Path dicek: {python_path}")
     sys.exit(1)
-
-
-# ============================================================
-# 1. INSTALL LIBRARIES
-# ============================================================
 
 libraries = {
     "PyQt5": "PyQt5",
@@ -45,11 +35,6 @@ for package_name, import_name in libraries.items():
             "install",
             package_name
         ])
-
-
-# ============================================================
-# 2. INSTALL THEME CUSTOMIZATION ONCE
-# ============================================================
 
 config_dir = os.path.join(PROJECT_ROOT, "config")
 theme_marker = os.path.join(config_dir, "theme_installed.flag")
@@ -83,11 +68,6 @@ if os.path.exists(theme_installer):
 else:
     print("⚠️ Installer Theme tidak ditemukan, dilewati")
     print(f"Dicari di: {theme_installer}")
-
-
-# ============================================================
-# 3. RUN SOUNDWAVE
-# ============================================================
 
 main_file = os.path.join(PROJECT_ROOT, "main.py")
 
